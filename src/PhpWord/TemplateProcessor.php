@@ -806,6 +806,56 @@ class TemplateProcessor
     }
 
     /**
+     * Clone all rows that contain the same variable tag across the document.
+     * Supports multiple tables with identical ${TAG}.
+     *
+     * Custom patch by q0b3rMAN, 2025-11-08
+     */
+    public function cloneRowAll($search, $numberOfClones): void
+    {
+        $search = static::ensureMacroCompleted($search);
+
+        $matches = [];
+        preg_match_all('/' . preg_quote($search, '/') . '/', $this->tempDocumentMainPart, $matches, PREG_OFFSET_CAPTURE);
+
+        if (empty($matches[0])) {
+            throw new Exception('Cannot clone row(s), variable not found: ' . $search);
+        }
+
+        foreach (array_reverse($matches[0]) as $match) {
+            $tagPos = $match[1];
+
+            $rowStart = $this->findRowStart($tagPos);
+            $rowEnd   = $this->findRowEnd($tagPos);
+            $xmlRow   = $this->getSlice($rowStart, $rowEnd);
+            
+            if (preg_match('#<w:vMerge w:val="restart"/>#', $xmlRow)) {
+                $extraRowEnd = $rowEnd;
+                while (true) {
+                    $extraRowStart = $this->findRowStart($extraRowEnd + 1);
+                    $extraRowEnd   = $this->findRowEnd($extraRowEnd + 1);
+
+                    if ($extraRowEnd < 7) break;
+
+                    $tmpXmlRow = $this->getSlice($extraRowStart, $extraRowEnd);
+                    if (!preg_match('#<w:vMerge/>#', $tmpXmlRow)
+                        && !preg_match('#<w:vMerge w:val="continue"\s*/>#', $tmpXmlRow)) {
+                        break;
+                    }
+                    $rowEnd = $extraRowEnd;
+                }
+                $xmlRow = $this->getSlice($rowStart, $rowEnd);
+            }
+
+            $result = $this->getSlice(0, $rowStart);
+            $result .= implode('', $this->indexClonedVariables($numberOfClones, $xmlRow));
+            $result .= $this->getSlice($rowEnd);
+
+            $this->tempDocumentMainPart = $result;
+        }
+    }
+
+    /**
      * Delete a table row in a template document.
      */
     public function deleteRow(string $search): void
